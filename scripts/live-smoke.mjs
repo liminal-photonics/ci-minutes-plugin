@@ -1,0 +1,22 @@
+// Live smoke test over stdio against public repositories. Needs GITHUB_TOKEN. Never prints the token.
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+const spec = process.env.SPEC;
+const start = async (env = {}) => { const c = new Client({ name: "smoke", version: "0" }); await c.connect(new StdioClientTransport({ command: spec ? "npx" : "node", args: spec ? ["-y", spec] : ["src/index.js"], env: { ...process.env, ...env } })); return c; };
+const c = await start();
+const call = async (cl, name, a = {}) => { const r = await cl.callTool({ name, arguments: a }); return r.isError ? { ERROR: r.content[0].text } : JSON.parse(r.content[0].text); };
+console.log("TOOLS", (await c.listTools()).tools.map((t) => t.name).join(", "));
+const st = await call(c, "ci_status"); console.log("STATUS", st.token, "| rate left", st.rateLimitRemaining);
+const repo = process.env.SMOKE_REPO || "sindresorhus/ky";
+const u = await call(c, "ci_repo_usage", { repo, days: 30, maxRuns: 20 });
+console.log("USAGE", repo, "private", u.private, "runs", u.runsAnalyzed, "/", u.totalRuns, "totals", JSON.stringify(u.totals));
+for (const w of u.workflows || []) console.log("  ", w.name, "runs", w.runs, "job-min", w.jobMinutes, JSON.stringify(w.byOs));
+const s = await call(c, "ci_suggestions", { repo, days: 30 });
+console.log("SUGGEST", s.workflows, "workflows,", s.findings?.length, "findings:", (s.findings || []).map((f) => `${f.severity}:${f.issue.slice(0, 50)}`).join(" | "));
+console.log("NOWF", JSON.stringify(await call(c, "ci_suggestions", { repo: "liminal-photonics/parts-sourcing-plugin" })).slice(0, 160));
+console.log("BADREPO", JSON.stringify(await call(c, "ci_repo_usage", { repo: "nope" })));
+console.log("MISSING", JSON.stringify(await call(c, "ci_repo_usage", { repo: "liminal-photonics/does-not-exist-xyz" })));
+await c.close();
+const n = await start({ GITHUB_TOKEN: "", GH_TOKEN: "" });
+console.log("NOKEY", JSON.stringify(await call(n, "ci_status")), JSON.stringify(await call(n, "ci_repo_usage", { repo })));
+await n.close();

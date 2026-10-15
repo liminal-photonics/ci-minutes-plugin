@@ -1,0 +1,16 @@
+{
+  "name": "ci-minutes",
+  "displayName": "CI Minutes (GitHub Actions usage)",
+  "version": "0.1.0",
+  "description": "See where your GitHub Actions minutes go: runs, durations and job minutes per repository and workflow, minutes by runner OS, estimated billable minutes, top consumers across an account, and GitHub's billing totals when your token allows. Reads workflow files and suggests concrete savings: path filters, concurrency cancel-in-progress, branch filters, cheaper runners, smaller matrices, timeouts, caching and [skip ci]. Read-only; uses your own token.",
+  "author": { "name": "Liminal Photonics" },
+  "homepage": "https://github.com/liminal-photonics/ci-minutes-plugin",
+  "repository": "https://github.com/liminal-photonics/ci-minutes-plugin",
+  "license": "MIT",
+  "logo": "assets/logo.svg",
+  "keywords": ["github", "actions", "ci", "billing", "minutes", "workflows", "devops", "cost", "mcp"],
+  "category": "developer-tools",
+  "tags": ["github", "ci", "cost", "mcp"],
+  "skills": "./skills/",
+  "mcpServers": "./mcp.json"
+}

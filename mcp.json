@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "ci-minutes": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "github:liminal-photonics/ci-minutes-plugin"],
+      "env": { "GITHUB_TOKEN": "${env:GITHUB_TOKEN}" }
+    }
+  }
+}
