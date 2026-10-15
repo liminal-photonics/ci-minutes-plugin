@@ -20,7 +20,8 @@ export async function gh(path, { allow404 = false, retry = true } = {}) {
     if (e.name === "TimeoutError" || e.name === "AbortError") throw new Error(`GitHub timed out after ${TIMEOUT_MS / 1000} s`);
     throw new Error(`GitHub network error: ${e.message}`);
   }
-  const limited = res.status === 429 || (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0");
+  // primary limit: 403/429 with remaining 0; secondary limit: 403/429 with retry-after
+  const limited = res.status === 429 || (res.status === 403 && (res.headers.get("x-ratelimit-remaining") === "0" || res.headers.has("retry-after")));
   if (limited) {
     const after = Number(res.headers.get("retry-after"));
     const reset = Number(res.headers.get("x-ratelimit-reset"));
@@ -33,7 +34,9 @@ export async function gh(path, { allow404 = false, retry = true } = {}) {
   if (res.status === 404) throw new Error("Not found (404): the repository or account doesn't exist, or the token can't see it.");
   if (res.status === 403) throw new Error("GitHub denied access (403): the token lacks permission for this (Actions read, or admin for billing).");
   if (!res.ok) throw new Error(`GitHub HTTP ${res.status}`);
-  return { body: await res.json(), link: res.headers.get("link") || "" };
+  let body;
+  try { body = await res.json(); } catch { throw new Error(`GitHub sent a response that is not valid JSON (HTTP ${res.status}); try again.`); }
+  return { body, link: res.headers.get("link") || "" };
 }
 
 const next = (link) => (link.match(/<([^>]+)>;\s*rel="next"/) || [])[1];
@@ -47,8 +50,9 @@ export async function paged(path, key, maxItems = 1000) {
     const r = await gh(url);
     const items = key ? r.body[key] || [] : r.body;
     if (key && total == null) total = r.body.total_count ?? null;
+    if (!Array.isArray(items)) throw new Error("GitHub sent an unexpected response shape.");
     out.push(...items);
-    url = next(r.link);
+    url = items.length ? next(r.link) : null; // GitHub stops filtered run listings at 1,000 results
   }
   return { items: out.slice(0, maxItems), total, truncated: Boolean(url) || out.length > maxItems };
 }

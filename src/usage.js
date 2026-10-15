@@ -4,7 +4,7 @@ import { gh, paged } from "./github.js";
 export const MULTIPLIER = { linux: 1, windows: 2, macos: 10 };
 
 export function parseRepo(s) {
-  const m = String(s || "").trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/, "").match(/^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/);
+  const m = String(s || "").trim().replace(/^(https?:\/\/)?(www\.)?github\.com\//i, "").replace(/\/(tree|blob|actions|pulls?|issues)(\/.*)?$/i, "").replace(/\/+$/, "").replace(/\.git$/, "").match(/^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/);
   if (!m) throw new Error('repo must look like "owner/name".');
   return { owner: m[1], name: m[2], full: `${m[1]}/${m[2]}` };
 }

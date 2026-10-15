@@ -29,7 +29,7 @@ export function analyzeWorkflow(path, text) {
   else if (typeof doc.concurrency === "object" && !doc.concurrency["cancel-in-progress"]) add("low", "Concurrency group set but cancel-in-progress is off.", "Set `cancel-in-progress: true` (except for deploy workflows that must finish).");
   if (on.schedule) {
     for (const s of [].concat(on.schedule || [])) {
-      const cron = String(s?.cron || "");
+      const cron = String(s?.cron || "").trim();
       const [min, hour] = cron.split(/\s+/);
       const perDay = (min.includes("*") || min.includes("/") || min.includes(",") ? 24 : 1) * (hour === "*" || hour?.includes("/") || hour?.includes(",") ? (hour === "*" ? 24 : hour.split(",").length || 2) : 1);
       if (/^\*|\//.test(min) || hour === "*") add("high", `Scheduled very often (cron "${cron}", up to ~${perDay}+ runs/day).`, "Run daily or weekly unless it truly needs more; scheduled runs bill even when nothing changed.");
@@ -44,7 +44,8 @@ export function analyzeWorkflow(path, text) {
     if (j["timeout-minutes"] == null) add("low", `Job "${id}" has no timeout-minutes (default 360).`, "Set `timeout-minutes:` to about 2× its normal duration so hung jobs don't burn hours.");
     const m = j.strategy?.matrix;
     if (m && typeof m === "object") {
-      const size = Object.entries(m).filter(([k]) => !["include", "exclude"].includes(k)).reduce((n, [, v]) => n * (Array.isArray(v) ? v.length : 1), 1) + (Array.isArray(m.include) ? m.include.length : 0) - (Array.isArray(m.exclude) ? m.exclude.length : 0);
+      const axes = Object.entries(m).filter(([k]) => !["include", "exclude"].includes(k));
+      const size = (axes.length ? axes.reduce((n, [, v]) => n * (Array.isArray(v) ? v.length : 1), 1) : 0) + (Array.isArray(m.include) ? m.include.length : 0) - (Array.isArray(m.exclude) ? m.exclude.length : 0);
       if (size >= 6) add("medium", `Job "${id}" matrix runs ~${size} jobs per trigger.`, "Run the full matrix on main or nightly and a small subset on pull requests.");
     }
     const steps = j.steps || [];
