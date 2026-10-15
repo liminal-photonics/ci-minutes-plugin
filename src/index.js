@@ -24,7 +24,7 @@ const H = {
   ci_run_timing: runTiming,
   ci_suggestions: async (a) => { const u = await repoUsage({ repo: a.repo, days: a.days || 30, maxRuns: 200 }).catch(() => null); return suggestions({ repo: a.repo, usage: u }); },
   ci_status: async () => {
-    if (!token()) return { token: "missing: set GITHUB_TOKEN (read-only Actions + Contents for fine-grained tokens)" };
+    if (!token()) return { token: "missing: public repositories still work (GitHub allows 60 unauthenticated calls an hour, enough for a few small checks). Set GITHUB_TOKEN (read-only Actions + Contents for fine-grained tokens) for private repositories, account totals and 5,000 calls an hour." };
     const me = await gh("/user", { allow404: true }).catch((e) => ({ error: e.message }));
     const rl = await gh("/rate_limit").catch(() => null);
     return { token: me?.error ? `configured but not working: ${me.error}` : "configured", account: me?.body?.login || null, rateLimitRemaining: rl?.body?.resources?.core?.remaining ?? null };

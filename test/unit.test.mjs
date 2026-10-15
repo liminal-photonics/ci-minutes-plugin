@@ -60,7 +60,7 @@ jobs:
   assert.equal(analyzeWorkflow("bad.yml", "on: [push\njobs:")[0].severity, "error");
 });
 
-test("pagination follows Link headers and stops at maxItems; missing token is a clear error", async () => {
+test("pagination follows Link headers and stops at maxItems; no token works for public repos with clear limits", async () => {
   const f = globalThis.fetch, saved = process.env.GITHUB_TOKEN;
   process.env.GITHUB_TOKEN = "t";
   let calls = 0;
@@ -77,8 +77,15 @@ test("pagination follows Link headers and stops at maxItems; missing token is a 
     assert.equal(some.items.length, 150); assert.equal(some.truncated, true);
     globalThis.fetch = async () => new Response("{}", { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 600) } });
     await assert.rejects(paged("/x", "workflow_runs"), /rate limit/);
-    delete process.env.GITHUB_TOKEN;
-    await assert.rejects(repoUsage({ repo: "a/b" }), /Set GITHUB_TOKEN/);
+    delete process.env.GITHUB_TOKEN; const savedGh = process.env.GH_TOKEN; delete process.env.GH_TOKEN;
+    // No token: request goes out without Authorization; a 404 explains that only public repos are visible.
+    let sentAuth = "unset";
+    globalThis.fetch = async (_u, init) => { sentAuth = init.headers.Authorization; return new Response("{}", { status: 404 }); };
+    await assert.rejects(repoUsage({ repo: "a/b" }), /only public repositories/);
+    assert.equal(sentAuth, undefined);
+    globalThis.fetch = async () => new Response("{}", { status: 403, headers: { "x-ratelimit-remaining": "0" } });
+    await assert.rejects(paged("/x", "workflow_runs"), /60 calls an hour/);
+    if (savedGh) process.env.GH_TOKEN = savedGh;
   } finally { globalThis.fetch = f; if (saved) process.env.GITHUB_TOKEN = saved; }
 });
 

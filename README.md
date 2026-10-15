@@ -16,7 +16,7 @@ Nothing is written: no workflow edits, no run cancellations, no settings changes
 
 ## Setup
 
-Set `GITHUB_TOKEN` (or `GH_TOKEN`):
+Without a token, public repositories still work at GitHub's unauthenticated limit of 60 API calls an hour (enough for a few small checks). For private repositories, account totals and 5,000 calls an hour, set `GITHUB_TOKEN` (or `GH_TOKEN`):
 - Fine-grained token: repository access to the repos you want, permissions **Actions: read** and **Contents: read** (and **Metadata: read**, added automatically). For account billing totals, the token owner must be able to read billing (org admin/billing manager, or your own user with the **Plan: read** permission).
 - Classic token: `repo` scope for private repositories (no scope needed for public ones), `read:org` for organization repos.
 
@@ -37,7 +37,7 @@ Optional: `GITHUB_API_URL` for GitHub Enterprise Server, `CI_MINUTES_TIMEOUT_MS`
 ```
 npm install
 npm test        # offline tests
-npm run live    # live smoke test, needs GITHUB_TOKEN (SPEC=github:liminal-photonics/ci-minutes-plugin#<sha> for a fresh npx install)
+npm run live    # live smoke test (GITHUB_TOKEN recommended) (SPEC=github:liminal-photonics/ci-minutes-plugin#<sha> for a fresh npx install)
 ```
 
 ## License

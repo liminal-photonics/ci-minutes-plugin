@@ -9,11 +9,11 @@ export function token() {
 
 export async function gh(path, { allow404 = false, retry = true } = {}) {
   const t = token();
-  if (!t) throw new Error("Set GITHUB_TOKEN (a fine-grained token with read-only Actions and Contents access, or a classic token with repo scope for private repos).");
+  // No token: public repositories still work, at GitHub's unauthenticated limit of 60 calls an hour.
   let res;
   try {
     res = await fetch(path.startsWith("http") ? path : `${BASE}${path}`, {
-      headers: { Authorization: `Bearer ${t}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "ci-minutes-plugin" },
+      headers: { ...(t ? { Authorization: `Bearer ${t}` } : {}), Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "ci-minutes-plugin" },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (e) {
@@ -27,11 +27,12 @@ export async function gh(path, { allow404 = false, retry = true } = {}) {
     const reset = Number(res.headers.get("x-ratelimit-reset"));
     const wait = after || (reset ? Math.max(0, reset - Date.now() / 1000) : 0);
     if (retry && wait > 0 && wait <= 5 && !process.env.NO_RETRY_429) { await new Promise((r) => setTimeout(r, wait * 1000)); return gh(path, { allow404, retry: false }); }
-    throw new Error(`GitHub rate limit reached${wait ? `; resets in about ${Math.ceil(wait / 60)} min` : ""}. Try a shorter period or fewer runs.`);
+    throw new Error(`GitHub rate limit reached${wait ? `; resets in about ${Math.ceil(wait / 60)} min` : ""}. ${t ? "Try a shorter period or fewer runs." : " Without a token GitHub allows 60 calls an hour; set GITHUB_TOKEN for 5,000."}`);
   }
   if (res.status === 401) throw new Error("GitHub rejected the token (401). Check that GITHUB_TOKEN is valid and not expired.");
   if (res.status === 404 && allow404) return null;
-  if (res.status === 404) throw new Error("Not found (404): the repository or account doesn't exist, or the token can't see it.");
+  if (res.status === 404) throw new Error(t ? "Not found (404): the repository or account doesn't exist, or the token can't see it." : "Not found (404): the repository or account doesn't exist, or it is private. Without GITHUB_TOKEN only public repositories are visible.");
+  if (res.status === 403 && !t) throw new Error("GitHub denied access (403) without a token. Set GITHUB_TOKEN (read-only Actions and Contents access).");
   if (res.status === 403) throw new Error("GitHub denied access (403): the token lacks permission for this (Actions read, or admin for billing).");
   if (!res.ok) throw new Error(`GitHub HTTP ${res.status}`);
   let body;
