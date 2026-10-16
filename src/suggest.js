@@ -1,3 +1,4 @@
+import { cronRuns } from "./cron.js";
 import YAML from "yaml";
 import { gh } from "./github.js";
 import { parseRepo } from "./usage.js";
@@ -30,9 +31,12 @@ export function analyzeWorkflow(path, text) {
   if (on.schedule) {
     for (const s of [].concat(on.schedule || [])) {
       const cron = String(s?.cron || "").trim();
-      const [min, hour] = cron.split(/\s+/);
-      const perDay = (min.includes("*") || min.includes("/") || min.includes(",") ? 24 : 1) * (hour === "*" || hour?.includes("/") || hour?.includes(",") ? (hour === "*" ? 24 : hour.split(",").length || 2) : 1);
-      if (/^\*|\//.test(min) || hour === "*") add("high", `Scheduled very often (cron "${cron}", up to ~${perDay}+ runs/day).`, "Run daily or weekly unless it truly needs more; scheduled runs bill even when nothing changed.");
+      let runs;
+      try { runs = cronRuns(cron); } catch (e) { add("low", `Could not read the schedule cron "${cron}" (${e.message}).`, "Check it at https://crontab.guru; GitHub skips schedules it cannot parse."); continue; }
+      const { perWeek, maxPerDay } = runs;
+      const daily = perWeek === maxPerDay * 7 ? `${maxPerDay} runs/day` : `${maxPerDay} runs/day on the days it runs, ${perWeek} runs/week`;
+      if (maxPerDay >= 24) add("high", `Scheduled very often (cron "${cron}": ${daily}).`, "Run daily or weekly unless it truly needs more; scheduled runs bill even when nothing changed.");
+      else if (maxPerDay >= 2) add("medium", `Scheduled several times a day (cron "${cron}": ${daily}).`, "Check whether once a day is enough; scheduled runs bill even when nothing changed.");
     }
   }
   const jobs = doc.jobs || {};
@@ -75,7 +79,10 @@ export async function suggestions({ repo, usage } = {}) {
     "Test locally before pushing so CI isn't used for debugging.",
   ];
   if (usage?.workflows?.length) {
-    const top = usage.workflows.filter((w) => w.jobMinutes > 0).slice(0, 3).map((w) => `${w.name}: ${w.jobMinutes} job-min, ${w.runs} runs`);
+    // ci_suggestions reads runs without per-job detail (one call per run would cost hundreds of API calls), so rank by
+    // job minutes when present, else by wall-clock minutes.
+    const mins = (w) => (w.jobMinutes > 0 ? w.jobMinutes : w.wallMinutes || 0);
+    const top = [...usage.workflows].filter((w) => mins(w) > 0).sort((a, b) => mins(b) - mins(a)).slice(0, 3).map((w) => (w.jobMinutes > 0 ? `${w.name}: ${w.jobMinutes} job-min, ${w.runs} runs` : `${w.name}: ${w.wallMinutes} wall-clock min, ${w.runs} runs`));
     if (top.length) general.unshift(`Biggest consumers in the period: ${top.join("; ")}. Fix those workflows first.`);
   }
   return { repo: r.full, workflows: files.length, findings, general };

@@ -36,7 +36,13 @@ function sinceDate(days) {
   return { days: d, iso: new Date(Date.now() - d * 86400000).toISOString().slice(0, 10) };
 }
 
-export async function repoUsage({ repo, days = 30, maxRuns = 300, includeJobs = true } = {}) {
+// Wall-clock budget for per-run job lookups, so one call stays well under client timeouts (a busy repo with 300 runs
+// took over 2 minutes when every run's jobs were fetched one after another).
+const BUDGET_MS = () => Number(process.env.CI_MINUTES_BUDGET_MS) || 20000;
+
+export async function repoUsage({ repo, days = 30, maxRuns = 300, includeJobs = true, deadline } = {}) {
+  const t0 = Date.now();
+  const until = deadline ?? t0 + BUDGET_MS();
   const r = parseRepo(repo);
   const since = sinceDate(days);
   const limit = Math.max(1, Math.min(2000, Math.floor(Number(maxRuns) || 300)));
@@ -47,7 +53,19 @@ export async function repoUsage({ repo, days = 30, maxRuns = 300, includeJobs = 
   for (const w of wf.items) byWf.set(w.id, { workflowId: w.id, name: w.name, path: w.path, state: w.state, runs: 0, conclusions: {}, events: {}, wallMinutes: 0, jobMinutes: 0, weightedMinutes: 0, byOs: {}, longestRunMinutes: 0, skipCiCommits: 0 });
   const notes = [];
   if (runs.truncated) notes.push(`Only the newest ${runs.items.length} of ${runs.total ?? "more"} runs were analyzed; raise maxRuns or shorten days for full coverage.`);
-  let jobsFetched = 0;
+  // Fetch job details 8 runs at a time until the time budget runs out.
+  const completed = includeJobs ? runs.items.filter((x) => x.status === "completed") : [];
+  const jobsByRun = new Map();
+  let next = 0, jobErrors = 0;
+  await Promise.all(Array.from({ length: Math.min(8, completed.length) }, async () => {
+    while (next < completed.length && Date.now() < until) {
+      const run = completed[next++];
+      try { jobsByRun.set(run.id, await paged(`/repos/${r.full}/actions/runs/${run.id}/jobs?filter=all`, "jobs", 500)); }
+      catch (e) { if (/rate limit|401|403/i.test(e.message)) throw e; jobErrors++; } // one failed page (GitHub 502) should not sink the whole report
+    }
+  }));
+  if (jobErrors) notes.push(`GitHub returned an error for the job list of ${jobErrors} run${jobErrors === 1 ? "" : "s"}; their job minutes are missing. Run again to fill them in.`);
+  if (includeJobs && jobsByRun.size + jobErrors < completed.length) notes.push(`Time limit reached: job minutes cover ${jobsByRun.size} of ${completed.length} completed runs (the newest first); the other runs count toward runs and wall-clock time only. Use a smaller days or maxRuns for full job detail.`);
   for (const run of runs.items) {
     let w = byWf.get(run.workflow_id);
     if (!w) { w = { workflowId: run.workflow_id, name: run.name, path: run.path, state: "deleted or dynamic", runs: 0, conclusions: {}, events: {}, wallMinutes: 0, jobMinutes: 0, weightedMinutes: 0, byOs: {}, longestRunMinutes: 0, skipCiCommits: 0 }; byWf.set(run.workflow_id, w); }
@@ -57,9 +75,8 @@ export async function repoUsage({ repo, days = 30, maxRuns = 300, includeJobs = 
     const wall = ms(run.run_started_at || run.created_at, run.updated_at) / 60000;
     w.wallMinutes += wall;
     w.longestRunMinutes = Math.max(w.longestRunMinutes, wall);
-    if (includeJobs && run.status === "completed") {
-      const jobs = await paged(`/repos/${r.full}/actions/runs/${run.id}/jobs?filter=all`, "jobs", 500);
-      jobsFetched++;
+    const jobs = jobsByRun.get(run.id);
+    if (jobs) {
       for (const j of jobs.items) {
         const m = jobMinutes(j);
         w.jobMinutes += m.roundedMinutes;
@@ -103,15 +120,20 @@ export async function accountUsage({ owner, days = 30, maxRepos = 30, maxRunsPer
   if (!isOrg && !self) notes0.push("Only public repositories are visible for another user's account.");
   const since = sinceDate(days);
   const rows = [], notes = [...notes0];
+  const deadline = Date.now() + BUDGET_MS();
+  let skippedForTime = 0;
   for (const rp of repos.items) {
     if (rp.archived) continue;
     if (new Date(rp.pushed_at) < new Date(since.iso)) continue; // no pushes in the period, so (almost always) no push-triggered runs
     try {
-      const u = await repoUsage({ repo: rp.full_name, days: since.days, maxRuns: maxRunsPerRepo });
-      if (u.runsAnalyzed) rows.push({ repo: u.repo, private: u.private, runs: u.totals.runs, jobMinutes: u.totals.jobMinutes, estimatedBillableMinutes: u.totals.estimatedBillableMinutes, topWorkflow: u.workflows[0] ? `${u.workflows[0].name} (${u.workflows[0].jobMinutes} job-min)` : null, truncated: u.notes.some((n) => n.startsWith("Only the newest")) });
+      if (Date.now() >= deadline) { skippedForTime++; continue; }
+      const u = await repoUsage({ repo: rp.full_name, days: since.days, maxRuns: maxRunsPerRepo, deadline });
+      if (u.runsAnalyzed) rows.push({ repo: u.repo, private: u.private, runs: u.totals.runs, jobMinutes: u.totals.jobMinutes, estimatedBillableMinutes: u.totals.estimatedBillableMinutes, topWorkflow: u.workflows[0] ? `${u.workflows[0].name} (${u.workflows[0].jobMinutes} job-min)` : null, truncated: u.notes.some((n) => n.startsWith("Only the newest")), partialJobs: u.notes.some((n) => n.startsWith("Time limit reached")) });
     } catch (e) { notes.push(`${rp.full_name}: ${e.message}`); }
   }
   rows.sort((a, b) => b.estimatedBillableMinutes - a.estimatedBillableMinutes || b.jobMinutes - a.jobMinutes);
+  if (skippedForTime) notes.push(`Time limit reached: ${skippedForTime} less recently pushed repositories were not checked. Use a smaller maxRepos or days, or check them one at a time with ci_repo_usage.`);
+  if (rows.some((r) => r.partialJobs)) notes.push("Some repositories have job minutes for only part of their runs (time limit); see ci_repo_usage for one repository.");
   if (repos.truncated) notes.push(`Only the ${repos.items.length} most recently pushed repositories were checked; raise maxRepos to include more.`);
   notes.push("Repositories with no push in the period are skipped (scheduled-only workflows in those repos may be missed).");
   let billing = null;

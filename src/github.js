@@ -34,7 +34,7 @@ export async function gh(path, { allow404 = false, retry = true } = {}) {
   if (res.status === 404) throw new Error(t ? "Not found (404): the repository or account doesn't exist, or the token can't see it." : "Not found (404): the repository or account doesn't exist, or it is private. Without GITHUB_TOKEN only public repositories are visible.");
   if (res.status === 403 && !t) throw new Error("GitHub denied access (403) without a token. Set GITHUB_TOKEN (read-only Actions and Contents access).");
   if (res.status === 403) throw new Error("GitHub denied access (403): the token lacks permission for this (Actions read, or admin for billing).");
-  if (!res.ok) throw new Error(`GitHub HTTP ${res.status}`);
+  if (!res.ok) throw new Error(res.status >= 500 ? `GitHub HTTP ${res.status} (a temporary GitHub-side error; try again in a minute)` : `GitHub HTTP ${res.status}`);
   let body;
   try { body = await res.json(); } catch { throw new Error(`GitHub sent a response that is not valid JSON (HTTP ${res.status}); try again.`); }
   return { body, link: res.headers.get("link") || "" };
