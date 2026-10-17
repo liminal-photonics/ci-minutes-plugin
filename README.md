@@ -10,7 +10,7 @@ A read-only MCP server and skill that shows where GitHub Actions minutes go and 
 | `ci_account_usage` | Top consumers across a user's or organization's recently pushed repositories, plus GitHub's billing usage totals when the token can read them. |
 | `ci_run_timing` | GitHub's own billable timing for one run (endpoint is being retired; often returns zeros on the new billing platform, and the tool says so). |
 | `ci_suggestions` | Reads `.github/workflows/*.yml` and lists concrete fixes with YAML: `paths-ignore`, branch filters, duplicate push + pull_request runs, `concurrency` with `cancel-in-progress`, frequent schedules, macOS/Windows runners, large matrices, missing `timeout-minutes`, missing dependency caching, plus `[skip ci]` and push batching. |
-| `ci_status` | Whether a token is configured, which account, remaining API rate limit. Never shows the token. |
+| `ci_status` | Whether a token is configured, which account, remaining API rate limit, plugin version and git commit. Never shows the token. |
 
 Nothing is written: no workflow edits, no run cancellations, no settings changes.
 
@@ -31,6 +31,13 @@ Optional: `GITHUB_API_URL` for GitHub Enterprise Server, `CI_MINUTES_TIMEOUT_MS`
 - GitHub's per-run billable timing API is being retired and now often returns zero; GitHub's billing page or usage report is the authority.
 - Large periods are capped by `maxRuns` (default 300) to protect your API rate limit (5000 requests/hour); the result says when it was truncated.
 - HTTP 429 and secondary rate limits wait once (up to 5 s) and otherwise return a clear message. Requests time out after 20 s.
+
+## Reliability fields (v0.2.0)
+
+- Every tool result carries `retrievedAt` (UTC, ISO 8601) and `plugin: { name, version, gitSha }`, so a saved result can be dated and traced to the exact build. Array results are wrapped as `{ result: [...] }`.
+- `ci_status` reports `pluginName`, `version`, `gitSha` and `gitShaSource` (the npm lockfile that installed the plugin, `PLUGIN_GIT_SHA`, or the git checkout).
+- Pin installs to a release tag (`#v0.2.0`) or a commit SHA, not the default branch, so an update can't change answers without notice. The tag is created on the merge commit; until it exists, pin the merge commit SHA.
+- `ci_repo_usage` and `ci_account_usage` return an `estimate` object: `complete` is false when runs were truncated, job minutes are missing (time limit or GitHub errors) or repositories were skipped; `gaps` lists why, and `howToReport` says to quote the figure as a lower bound. These are estimates, never billing figures.
 
 ## Development
 

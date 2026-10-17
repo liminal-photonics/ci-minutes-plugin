@@ -3,7 +3,7 @@
     "ci-minutes": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "github:liminal-photonics/ci-minutes-plugin"],
+      "args": ["-y", "github:liminal-photonics/ci-minutes-plugin#v0.2.0"],
       "env": { "GITHUB_TOKEN": "${env:GITHUB_TOKEN}" }
     }
   }
