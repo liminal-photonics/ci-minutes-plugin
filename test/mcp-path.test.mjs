@@ -65,6 +65,8 @@ test("MCP ci_repo_usage: slow job lookups stop at the time budget with a note in
     assert.ok(Date.now() - t0 < 5000);
     assert.equal(r.totals.runs, 20);
     assert.ok(r.notes.some((n) => /Time limit reached: job minutes cover 8 of 20 completed runs/.test(n)), JSON.stringify(r.notes));
+    assert.equal(r.estimate.complete, false);
+    assert.match(r.estimate.howToReport, /lower bound/);
   } finally { await c.close(); slowJobsMs = 0; }
 });
 
@@ -78,5 +80,7 @@ test("MCP ci_repo_usage: a GitHub 502 on one run's jobs is reported, not fatal",
     const j = JSON.parse(r.content[0].text);
     assert.ok(j.notes.some((n) => /error for the job list of 1 run/.test(n)));
     assert.equal(j.totals.jobMinutes, 19 * 2);
+    assert.equal(j.estimate.complete, false);
+    assert.ok(j.estimate.gaps.some((g) => /job lists/.test(g)));
   } finally { await c.close(); failJobs = false; }
 });

@@ -1,6 +1,6 @@
 {
   "name": "ci-minutes-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Read-only MCP server that reports GitHub Actions usage per repository and workflow and suggests ways to save minutes.",
   "type": "module",
   "bin": { "ci-minutes-mcp": "src/index.js" },

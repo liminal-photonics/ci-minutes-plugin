@@ -92,7 +92,26 @@ export async function repoUsage({ repo, days = 30, maxRuns = 300, includeJobs = 
   return {
     repo: r.full, private: Boolean(meta.private), period: `since ${since.iso} (${since.days} days)`, runsAnalyzed: runs.items.length, totalRuns: runs.total,
     totals: { ...tot, estimatedBillableMinutes: meta.private ? tot.weightedMinutes : 0 },
+    // An estimate, never a billing figure. complete:false means some runs or jobs were not counted, so the true figure
+    // is higher; any summary must say so instead of quoting the number as exact.
+    estimate: estimateInfo({ truncated: Boolean(runs.truncated), partialJobs: notes.some((n) => n.startsWith("Time limit reached")), jobErrors: notes.some((n) => /error for the job list/.test(n)) }),
     workflows, notes,
+  };
+}
+
+export function estimateInfo({ truncated = false, partialJobs = false, jobErrors = false, skippedRepos = 0, repoErrors = 0, billingAvailable = false } = {}) {
+  const gaps = [];
+  if (truncated) gaps.push("only the newest runs or repositories were analyzed");
+  if (partialJobs) gaps.push("job minutes were counted for only part of the runs (time limit)");
+  if (jobErrors) gaps.push("GitHub returned an error for some runs' job lists, so those minutes are missing");
+  if (repoErrors) gaps.push(`${repoErrors} repositories returned an error and were not counted`);
+  if (skippedRepos) gaps.push(`${skippedRepos} repositories were skipped (time limit)`);
+  return {
+    isEstimate: true,
+    complete: gaps.length === 0,
+    gaps,
+    authoritativeSource: billingAvailable ? "billing.actionsQuantity (GitHub billing usage report)" : "GitHub's billing page (the token cannot read billing)",
+    howToReport: gaps.length ? "Report as a lower bound (\"at least N minutes, estimate\")." : "Report as an estimate (\"about N minutes, estimate\"), not as a billing figure.",
   };
 }
 
@@ -121,15 +140,15 @@ export async function accountUsage({ owner, days = 30, maxRepos = 30, maxRunsPer
   const since = sinceDate(days);
   const rows = [], notes = [...notes0];
   const deadline = Date.now() + BUDGET_MS();
-  let skippedForTime = 0;
+  let skippedForTime = 0, repoErrors = 0;
   for (const rp of repos.items) {
     if (rp.archived) continue;
     if (new Date(rp.pushed_at) < new Date(since.iso)) continue; // no pushes in the period, so (almost always) no push-triggered runs
     try {
       if (Date.now() >= deadline) { skippedForTime++; continue; }
       const u = await repoUsage({ repo: rp.full_name, days: since.days, maxRuns: maxRunsPerRepo, deadline });
-      if (u.runsAnalyzed) rows.push({ repo: u.repo, private: u.private, runs: u.totals.runs, jobMinutes: u.totals.jobMinutes, estimatedBillableMinutes: u.totals.estimatedBillableMinutes, topWorkflow: u.workflows[0] ? `${u.workflows[0].name} (${u.workflows[0].jobMinutes} job-min)` : null, truncated: u.notes.some((n) => n.startsWith("Only the newest")), partialJobs: u.notes.some((n) => n.startsWith("Time limit reached")) });
-    } catch (e) { notes.push(`${rp.full_name}: ${e.message}`); }
+      if (u.runsAnalyzed) rows.push({ repo: u.repo, private: u.private, runs: u.totals.runs, jobMinutes: u.totals.jobMinutes, estimatedBillableMinutes: u.totals.estimatedBillableMinutes, topWorkflow: u.workflows[0] ? `${u.workflows[0].name} (${u.workflows[0].jobMinutes} job-min)` : null, truncated: u.notes.some((n) => n.startsWith("Only the newest")), partialJobs: u.notes.some((n) => n.startsWith("Time limit reached")), jobErrors: u.notes.some((n) => /error for the job list/.test(n)) });
+    } catch (e) { repoErrors++; notes.push(`${rp.full_name}: ${e.message}`); }
   }
   rows.sort((a, b) => b.estimatedBillableMinutes - a.estimatedBillableMinutes || b.jobMinutes - a.jobMinutes);
   if (skippedForTime) notes.push(`Time limit reached: ${skippedForTime} less recently pushed repositories were not checked. Use a smaller maxRepos or days, or check them one at a time with ci_repo_usage.`);
@@ -145,5 +164,6 @@ export async function accountUsage({ owner, days = 30, maxRepos = 30, maxRunsPer
     const sum = (f) => +items.reduce((s, i) => s + (Number(i[f]) || 0), 0).toFixed(2);
     billing = { available: true, actionsQuantity: sum("quantity"), unit: items[0]?.unitType || "minutes", grossAmountUSD: sum("grossAmount"), netAmountUSD: sum("netAmount"), note: "From GitHub's billing usage report for the current billing year, filtered to the period." };
   }
-  return { owner: o, type: acct.type, period: `since ${since.iso}`, topConsumers: rows, billing, notes };
+  const estimate = estimateInfo({ truncated: Boolean(repos.truncated) || rows.some((r) => r.truncated), partialJobs: rows.some((r) => r.partialJobs), jobErrors: rows.some((r) => r.jobErrors), repoErrors, skippedRepos: skippedForTime, billingAvailable: Boolean(billing?.available) });
+  return { owner: o, type: acct.type, period: `since ${since.iso}`, topConsumers: rows, estimate, billing, notes };
 }
